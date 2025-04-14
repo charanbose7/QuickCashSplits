@@ -42,12 +42,14 @@ public class QuickCashController : MonoBehaviour
         int minSpins = CalculateMinSpins(wager, basePrize);
         (float minCoinValue, float maxCoinValue) = GetCoinValueRange(wager, basePrize, minSpins);
 
+        int roundedPrize = RoundToNearest(basePrize, PrizeRoundingFactor);
+        int minCoinInt = RoundToNearest(minCoinValue, PrizeRoundingFactor);
+        int maxCoinInt = RoundToNearest(maxCoinValue, PrizeRoundingFactor);
+
         Debug.Log($"Wager: {wager}, Base Prize: {basePrize}, Min Spins: {minSpins}, Min Coin Value: {minCoinValue}, Max Coin Value: {maxCoinValue}");
 
-        int roundedPrize = RoundToNearest(basePrize, PrizeRoundingFactor);
         List<int> spinChunks = GeneratePrizeChunks(roundedPrize, minSpins);
-
-        List<List<string>> allFrameSplits = GenerateAllFrameSplits(spinChunks);
+        List<List<string>> allFrameSplits = GenerateAllFrameSplits(spinChunks, minCoinInt, maxCoinInt);
 
         RunValidationTests(spinChunks, allFrameSplits, roundedPrize);
     }
@@ -112,77 +114,83 @@ public class QuickCashController : MonoBehaviour
         return values;
     }
 
-    List<List<string>> GenerateAllFrameSplits(List<int> spinChunks)
+    List<List<string>> GenerateAllFrameSplits(List<int> spinChunks, int minCoinInt, int maxCoinInt)
     {
         List<List<string>> allFrameSplits = new List<List<string>>();
 
         foreach (int spinValue in spinChunks)
         {
-            List<string> rawFrames = GenerateSpinFrameSplits(spinValue);
-            (var groupedFrames, int combinationCount) = GroupAdjacentFrames(rawFrames);
-            allFrameSplits.Add(groupedFrames);
+            List<string> rawFrames = GenerateSpinFrameSplits(spinValue, minCoinInt, maxCoinInt);
+            int combinationCount = GroupAdjacentFrames(rawFrames);
+            allFrameSplits.Add(rawFrames);
 
-            string frameLog = string.Join(", ", groupedFrames.Select((value, index) => $"[{index}, \"{value}\"]"));
+            string frameLog = string.Join(", ", rawFrames.Select((value, index) => $"[{index}, \"{value}\"]"));
             Debug.Log($"Spin Value: {spinValue}, Combinations Used: {combinationCount}, Frame Splits: {frameLog}");
         }
 
         return allFrameSplits;
     }
 
-    List<string> GenerateSpinFrameSplits(int spinValue)
+    private List<string> GenerateSpinFrameSplits(int spinValue, int minCoinInt, int maxCoinInt)
     {
-        List<int> filledFrames = new List<int>();
-        int remaining = spinValue;
+        List<string> result;
 
-        int nonEmptyCount = Random.Range(MinNonEmptyFrames, MaxNonEmptyFrames);
-
-        var coinRange = config.coinValueRanges.FirstOrDefault(c => c.wager == config.wager);
-        float minCoin = coinRange?.minCoinValue ?? 0;
-        float maxCoin = coinRange?.maxCoinValue ?? spinValue;
-
-        int minCoinInt = RoundToNearest(minCoin, PrizeRoundingFactor);
-        int maxCoinInt = RoundToNearest(maxCoin, PrizeRoundingFactor);
-
-        while (true)
+        do
         {
-            filledFrames.Clear();
-            remaining = spinValue;
+            List<int> filled = new List<int>();
+            int remaining = spinValue;
 
-            for (int i = 0; i < nonEmptyCount - 1; i++)
+            int maxFill = Mathf.Min(DefaultFrames, spinValue / minCoinInt);
+            int fillCount = Random.Range(3, maxFill + 1); // At least 3 for possible valid group
+
+            for (int i = 0; i < fillCount - 1; i++)
             {
-                int average = remaining / (nonEmptyCount - i);
-                int minChunk = Mathf.Max(minCoinInt, (int)(average * MinChunkMultiplier));
-                int maxChunk = Mathf.Min(maxCoinInt, (int)(average * MaxChunkMultiplier));
+                int avg = remaining / (fillCount - i);
+                int minVal = Mathf.Max(minCoinInt, RoundToNearest(avg * MinChunkMultiplier, PrizeRoundingFactor));
+                int maxVal = Mathf.Min(maxCoinInt, RoundToNearest(avg * MaxChunkMultiplier, PrizeRoundingFactor));
+                int val = RoundToNearest(Random.Range(minVal, maxVal + 1), PrizeRoundingFactor);
 
-                int value = Random.Range(minChunk, maxChunk + 1);
-                value = RoundToNearest(value, PrizeRoundingFactor);
-
-                filledFrames.Add(value);
-                remaining -= value;
+                filled.Add(val);
+                remaining -= val;
             }
 
-            int lastValue = RoundToNearest(remaining, PrizeRoundingFactor);
+            int last = RoundToNearest(remaining, PrizeRoundingFactor);
+            filled.Add(last);
 
-            if (lastValue < minCoinInt || lastValue > maxCoinInt)
-                continue;
+            result = Enumerable.Repeat("", DefaultFrames).ToList();
+            var indices = Enumerable.Range(0, DefaultFrames).OrderBy(_ => Random.value).Take(filled.Count).ToList();
+            for (int i = 0; i < filled.Count; i++)
+                result[indices[i]] = filled[i].ToString();
 
-            filledFrames.Add(lastValue);
+        } while (GroupAdjacentFrames(result) == 0); // Ensure at least one valid group
 
-            if (filledFrames.Sum() == spinValue)
-                break;
-        }
+        return result;
+    }
 
-        List<string> finalFrames = Enumerable.Repeat("", DefaultFrames).ToList();
-        List<int> availableIndexes = Enumerable.Range(0, DefaultFrames).ToList();
+    private int GroupAdjacentFrames(List<string> frames)
+    {
+        int comboCount = 0;
+        int currentStreak = 0;
 
-        foreach (int val in filledFrames)
+        for (int i = 0; i < frames.Count; i++)
         {
-            int randIndex = availableIndexes[Random.Range(0, availableIndexes.Count)];
-            finalFrames[randIndex] = val.ToString();
-            availableIndexes.Remove(randIndex);
+            if (!string.IsNullOrEmpty(frames[i]))
+            {
+                currentStreak++;
+            }
+            else
+            {
+                if (currentStreak >= 3)
+                    comboCount++;
+
+                currentStreak = 0;
+            }
         }
 
-        return finalFrames;
+        if (currentStreak >= 3)
+            comboCount++;
+
+        return comboCount;
     }
 
     void RunValidationTests(List<int> spinChunks, List<List<string>> allFrameSplits, float basePrize)
@@ -208,72 +216,6 @@ public class QuickCashController : MonoBehaviour
         }
 
         Debug.Log("Validation done.");
-    }
-
-    (List<string>, int) GroupAdjacentFrames(List<string> frames)
-    {
-        List<List<int>> groups = new List<List<int>>();
-        List<int> currentGroup = new List<int>();
-
-        for (int i = 0; i < frames.Count; i++)
-        {
-            if (!string.IsNullOrEmpty(frames[i]))
-            {
-                if (currentGroup.Count == 0 || i == currentGroup.Last() + 1)
-                {
-                    currentGroup.Add(i);
-                }
-                else
-                {
-                    groups.Add(new List<int>(currentGroup));
-                    currentGroup.Clear();
-                    currentGroup.Add(i);
-                }
-            }
-            else
-            {
-                if (currentGroup.Count > 0)
-                {
-                    groups.Add(new List<int>(currentGroup));
-                    currentGroup.Clear();
-                }
-            }
-        }
-
-        if (currentGroup.Count > 0)
-            groups.Add(currentGroup);
-
-        while (groups.Count > config.maxCombinations)
-        {
-            int minGap = int.MaxValue;
-            int mergeIndex = 0;
-
-            for (int i = 0; i < groups.Count - 1; i++)
-            {
-                int gap = groups[i + 1][0] - groups[i].Last();
-                if (gap < minGap)
-                {
-                    minGap = gap;
-                    mergeIndex = i;
-                }
-            }
-
-            groups[mergeIndex].AddRange(groups[mergeIndex + 1]);
-            groups.RemoveAt(mergeIndex + 1);
-        }
-
-        List<string> newFrames = Enumerable.Repeat("", DefaultFrames).ToList();
-
-        foreach (var group in groups)
-        {
-            int groupTotal = group.Sum(i => !string.IsNullOrEmpty(frames[i]) ? int.Parse(frames[i]) : 0);
-            List<int> split = GenerateCleanSplit(groupTotal, group.Count);
-
-            for (int j = 0; j < group.Count; j++)
-                newFrames[group[j]] = split[j].ToString();
-        }
-
-        return (newFrames, groups.Count);
     }
 
     List<int> GenerateCleanSplit(int total, int parts)
