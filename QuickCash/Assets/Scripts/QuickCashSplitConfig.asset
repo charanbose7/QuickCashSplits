@@ -12,10 +12,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a2e89319f8fcce74ba269d0a15ebfddd, type: 3}
   m_Name: QuickCashSplitConfig
   m_EditorClassIdentifier: 
-  basePrize: 149500
+  basePrize: 30000
   maxSpins: 5
   wager: 500
   maxCombinations: 3
+  desiredCombinations: 2
+  maxAdjacentElements: 3
   coinValueRanges:
   - wager: 50
     minCoinValue: 100

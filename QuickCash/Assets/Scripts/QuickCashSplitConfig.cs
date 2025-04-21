@@ -14,7 +14,9 @@ public class QuickCashSplitConfig : ScriptableObject
     public float basePrize;
     public int maxSpins;
     public int wager;
-    public int maxCombinations;
+    public int maxCombinations = 3; // Maximum possible combinations
+    public int desiredCombinations = 2; // Target number of combinations (defaults to 2 as in the example)
+    public int maxAdjacentElements = 3;
 
     public CoinValueRange[] coinValueRanges;
 }
